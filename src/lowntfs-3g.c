@@ -113,6 +113,10 @@
 
 #include "ntfs-3g_common.h"
 
+extern void **get_current_ntfs_ctx_ptr(void);
+#define ctx (*((ntfs_fuse_context_t **)get_current_ntfs_ctx_ptr()))
+
+
 /*
  *	The following permission checking modes are governed by
  *	the LPERMSCONFIG value in param.h
@@ -241,7 +245,9 @@ static struct ntfs_options opts;
 
 const char *EXEC_NAME = "lowntfs-3g";
 
+#ifndef ctx
 static ntfs_fuse_context_t *ctx;
+#endif
 static u32 ntfs_sequence;
 static const char ghostformat[] = ".ghost-ntfs-3g-%020llu";
 
