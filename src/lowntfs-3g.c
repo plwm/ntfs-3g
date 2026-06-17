@@ -1487,6 +1487,156 @@ static void ntfs_fuse_releasedir(fuse_req_t req,
 	fuse_reply_err(req, -res);
 }
 
+#ifdef USE_DIRECT_READDIR
+
+typedef struct {
+	fuse_req_t req;
+	char *dest_buf;
+	size_t dest_size;
+	size_t size;
+	int off_to_skip;
+	int current_index;
+	int buffer_full;
+} ntfs_fuse_direct_fill_ctx_t;
+
+static int ntfs_fuse_direct_filler(ntfs_fuse_direct_fill_ctx_t *fctx,
+		const ntfschar *name, const int name_len, const int name_type,
+		const s64 pos, const MFT_REF mref,
+		const unsigned dt_type)
+{
+	char *filename = NULL;
+	int filenamelen = -1;
+	struct stat st = { .st_ino = MREF(mref) };
+	size_t entsize;
+
+	if (name_type == FILE_NAME_DOS)
+		return 0;
+
+	if ((filenamelen = ntfs_ucstombs(name, name_len, &filename, 0)) < 0) {
+		ntfs_log_error("direct_filler: ntfs_ucstombs failed for name_len=%d", name_len);
+		return -1;
+	}
+
+	ntfs_log_trace("direct_filler: filename='%s' mref=%lld type=%d pos=%lld index=%d",
+					 filename ? filename : "NULL", (long long)MREF(mref), name_type, (long long)pos, fctx->current_index + 1);
+
+	if (MREF(mref) > 1) {
+		fctx->current_index++;
+		if (fctx->current_index <= fctx->off_to_skip) {
+			ntfs_log_trace("direct_filler: skipping '%s' (current=%d <= skip=%d)",
+							 filename, fctx->current_index, fctx->off_to_skip);
+			free(filename);
+			return 0; // Skip this entry
+		}
+
+		switch (dt_type) {
+		case NTFS_DT_DIR :
+			st.st_mode = S_IFDIR | (0777 & ~ctx->dmask); 
+			break;
+		case NTFS_DT_LNK :
+			st.st_mode = S_IFLNK | 0777;
+			break;
+		case NTFS_DT_FIFO :
+			st.st_mode = S_IFIFO;
+			break;
+		case NTFS_DT_SOCK :
+			st.st_mode = S_IFSOCK;
+			break;
+		case NTFS_DT_BLK :
+			st.st_mode = S_IFBLK;
+			break;
+		case NTFS_DT_CHR :
+			st.st_mode = S_IFCHR;
+			break;
+		default :
+		case NTFS_DT_REG :
+			st.st_mode = S_IFREG | (0777 & ~ctx->fmask);
+			break;
+		}
+
+		entsize = fuse_add_direntry(fctx->req, NULL, 0, filename, &st, fctx->current_index);
+		if (fctx->size + entsize > fctx->dest_size) {
+			ntfs_log_trace("direct_filler: buffer full adding '%s' (size=%d entsize=%d dest=%d)",
+							 filename, (int)fctx->size, (int)entsize, (int)fctx->dest_size);
+			free(filename);
+			fctx->buffer_full = 1;
+			return 1; // Buffer full, stop iteration
+		}
+
+		fuse_add_direntry(fctx->req, fctx->dest_buf + fctx->size,
+						  fctx->dest_size - fctx->size, filename, &st, fctx->current_index);
+		ntfs_log_trace("direct_filler: added '%s' at offset %d size=%d",
+						 filename, (int)fctx->size, (int)entsize);
+		fctx->size += entsize;
+	} else {
+		ntfs_log_trace("direct_filler: skipped system metadata file '%s' (mref=%lld <= 1)",
+						 filename, (long long)MREF(mref));
+	}
+
+	free(filename);
+	return 0;
+}
+
+static void ntfs_fuse_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
+			off_t off,
+			struct fuse_file_info *fi __attribute__((unused)))
+{
+	ntfs_inode *ni;
+	s64 pos = 0; // Always start scanning from 0
+	int err = 0;
+	ntfs_fuse_direct_fill_ctx_t fctx;
+
+	ntfs_log_trace("ntfs_fuse_readdir: ino=%016llx INODE=%lld off=%lld size=%d",
+					 (long long)ino, (long long)INODE(ino), (long long)off, (int)size);
+
+	fctx.req = req;
+	fctx.dest_buf = req->result.buffer.dest_buf;
+	fctx.dest_size = req->result.buffer.dest_size;
+	fctx.size = 0;
+	fctx.off_to_skip = (int)off;
+	fctx.current_index = 0;
+	fctx.buffer_full = 0;
+
+	ni = ntfs_inode_open(ctx->vol, INODE(ino));
+	if (!ni) {
+		err = -errno;
+		ntfs_log_error("ntfs_fuse_readdir: failed to open inode %lld errno=%d",
+						 (long long)INODE(ino), errno);
+	} else {
+		if (ni->flags & FILE_ATTR_REPARSE_POINT) {
+			ntfs_log_error("ntfs_fuse_readdir: reparse point inode %lld not supported",
+							 (long long)INODE(ino));
+			err = -EOPNOTSUPP;
+		} else {
+			if (ntfs_readdir(ni, &pos, &fctx, (ntfs_filldir_t)ntfs_fuse_direct_filler)) {
+				if (fctx.buffer_full) {
+					err = 0;
+					ntfs_log_trace("ntfs_fuse_readdir: ntfs_readdir stopped because buffer is full (ino=%lld)",
+									 (long long)INODE(ino));
+				} else {
+					err = -errno;
+					ntfs_log_error("ntfs_fuse_readdir: ntfs_readdir failed for inode %lld errno=%d",
+									 (long long)INODE(ino), errno);
+				}
+			}
+		}
+		ntfs_fuse_update_times(ni, NTFS_UPDATE_ATIME);
+		if (ntfs_inode_close(ni))
+			set_fuse_error(&err);
+	}
+
+	ntfs_log_trace("ntfs_fuse_readdir: done err=%d fctx.size=%d pos=%lld current_index=%d",
+					 err, (int)fctx.size, (long long)pos, fctx.current_index);
+
+	if (err < 0) {
+		fuse_reply_err(req, -err);
+	} else {
+		fuse_reply_buf(req, fctx.dest_buf, fctx.size);
+	}
+}
+
+#else
+
 static void ntfs_fuse_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
 			off_t off __attribute__((unused)),
 			struct fuse_file_info *fi __attribute__((unused)))
@@ -1603,6 +1753,8 @@ static void ntfs_fuse_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
 	if (err)
 		fuse_reply_err(req, -err);
 }
+
+#endif // USE_DIRECT_READDIR
 
 static void ntfs_fuse_open(fuse_req_t req, fuse_ino_t ino,
 		      struct fuse_file_info *fi)
