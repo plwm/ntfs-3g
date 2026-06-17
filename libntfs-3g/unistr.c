@@ -1158,41 +1158,52 @@ char *ntfs_uppercase_mbs(const char *low,
 	char *t;
 
 	size = strlen(low);
-	upp = (char*)ntfs_malloc(3*size + 1);
-	if (upp) {
-		s = low;
-		t = upp;
-		do {
-			n = utf8_to_unicode(&wc, s);
-			if (n > 0) {
-				if (wc < upcase_size)
-					wc = le16_to_cpu(upcase[wc]);
-				if (wc < 0x80)
-					*t++ = wc;
-				else if (wc < 0x800) {
-					*t++ = (0xc0 | ((wc >> 6) & 0x3f));
-					*t++ = 0x80 | (wc & 0x3f);
-				} else if (wc < 0x10000) {
-					*t++ = 0xe0 | (wc >> 12);
-					*t++ = 0x80 | ((wc >> 6) & 0x3f);
-					*t++ = 0x80 | (wc & 0x3f);
-				} else {
-					*t++ = 0xf0 | ((wc >> 18) & 7);
-					*t++ = 0x80 | ((wc >> 12) & 63);
-					*t++ = 0x80 | ((wc >> 6) & 0x3f);
-					*t++ = 0x80 | (wc & 0x3f);
+	if (use_utf8) {
+		upp = (char*)ntfs_malloc(3*size + 1);
+		if (upp) {
+			s = low;
+			t = upp;
+			do {
+				n = utf8_to_unicode(&wc, s);
+				if (n > 0) {
+					if (wc < upcase_size)
+						wc = le16_to_cpu(upcase[wc]);
+					if (wc < 0x80)
+						*t++ = wc;
+					else if (wc < 0x800) {
+						*t++ = (0xc0 | ((wc >> 6) & 0x3f));
+						*t++ = 0x80 | (wc & 0x3f);
+					} else if (wc < 0x10000) {
+						*t++ = 0xe0 | (wc >> 12);
+						*t++ = 0x80 | ((wc >> 6) & 0x3f);
+						*t++ = 0x80 | (wc & 0x3f);
+					} else {
+						*t++ = 0xf0 | ((wc >> 18) & 7);
+						*t++ = 0x80 | ((wc >> 12) & 63);
+						*t++ = 0x80 | ((wc >> 6) & 0x3f);
+						*t++ = 0x80 | (wc & 0x3f);
+					}
+				s += n;
 				}
-			s += n;
+			} while (n > 0);
+			if (n < 0) {
+				free(upp);
+				upp = (char*)NULL;
+				errno = EILSEQ;
+			} else {
+				*t = 0;
 			}
-		} while (n > 0);
-		if (n < 0) {
-			free(upp);
-			upp = (char*)NULL;
-			errno = EILSEQ;
-		} else {
-			*t = 0;
+		}
+	} 
+#if MB_CUR_MAX
+	else {
+		upp = (char*)ntfs_malloc(size + 1);
+		if (upp) {
+			mbsupr(upp, low, size);
+			upp[size] = '\0';
 		}
 	}
+#endif /* MB_CUR_MAX */
 	return (upp);
 }
 
