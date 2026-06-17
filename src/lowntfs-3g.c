@@ -1719,11 +1719,19 @@ static void ntfs_fuse_read(fuse_req_t req, fuse_ino_t ino, size_t size,
 		res = 0;
 		goto exit;
 	}
+#ifdef USE_DIRECT_READ_BUFFER
+	if (!req || !req->result.buffer.dest_buf || req->result.buffer.dest_size < size) {
+		res = -EINVAL;
+		goto exit;
+	}
+	buf = req->result.buffer.dest_buf;
+#else
 	buf = (char*)ntfs_malloc(size);
 	if (!buf) {
 		res = -errno;
 		goto exit;
 	}
+#endif
 
 	ni = ntfs_inode_open(ctx->vol, INODE(ino));
 	if (!ni) {
@@ -1795,7 +1803,9 @@ exit:
 		fuse_reply_err(req, -res);
 	else
 		fuse_reply_buf(req, buf, res);
+#ifndef USE_DIRECT_READ_BUFFER
 	free(buf);
+#endif
 }
 
 static void ntfs_fuse_write(fuse_req_t req, fuse_ino_t ino, const char *buf, 
