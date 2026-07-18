@@ -113,8 +113,8 @@
 
 #include "ntfs-3g_common.h"
 
-extern void **get_current_ntfs_ctx_ptr(void);
-#define ctx (*((ntfs_fuse_context_t **)get_current_ntfs_ctx_ptr()))
+extern void **get_current_vfs_ctx_ptr(void);
+#define ctx (*((ntfs_fuse_context_t **)get_current_vfs_ctx_ptr()))
 
 
 /*
