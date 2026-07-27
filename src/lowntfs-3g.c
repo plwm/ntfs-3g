@@ -948,11 +948,19 @@ nodata :
 	stbuf->st_ino = ni->mft_no;
 #ifdef HAVE_STRUCT_STAT_ST_ATIMESPEC
 	stbuf->st_atimespec = ntfs2timespec(ni->last_access_time);
+#ifdef WIN32
+	stbuf->st_ctimespec = ntfs2timespec(ni->creation_time);
+#else
 	stbuf->st_ctimespec = ntfs2timespec(ni->last_mft_change_time);
+#endif
 	stbuf->st_mtimespec = ntfs2timespec(ni->last_data_change_time);
 #elif defined(HAVE_STRUCT_STAT_ST_ATIM)
 	stbuf->st_atim = ntfs2timespec(ni->last_access_time);
+#ifdef WIN32
+	stbuf->st_ctim = ntfs2timespec(ni->creation_time);
+#else
 	stbuf->st_ctim = ntfs2timespec(ni->last_mft_change_time);
+#endif
 	stbuf->st_mtim = ntfs2timespec(ni->last_data_change_time);
 #elif defined(HAVE_STRUCT_STAT_ST_ATIMENSEC)
 	{
@@ -961,7 +969,11 @@ nodata :
 	ts = ntfs2timespec(ni->last_access_time);
 	stbuf->st_atime = ts.tv_sec;
 	stbuf->st_atimensec = ts.tv_nsec;
+#ifdef WIN32
+	ts = ntfs2timespec(ni->creation_time);
+#else
 	ts = ntfs2timespec(ni->last_mft_change_time);
+#endif
 	stbuf->st_ctime = ts.tv_sec;
 	stbuf->st_ctimensec = ts.tv_nsec;
 	ts = ntfs2timespec(ni->last_data_change_time);
@@ -975,7 +987,11 @@ nodata :
 
 	ts = ntfs2timespec(ni->last_access_time);
 	stbuf->st_atime = ts.tv_sec;
+#ifdef WIN32
+	ts = ntfs2timespec(ni->creation_time);
+#else
 	ts = ntfs2timespec(ni->last_mft_change_time);
+#endif
 	stbuf->st_ctime = ts.tv_sec;
 	ts = ntfs2timespec(ni->last_data_change_time);
 	stbuf->st_mtime = ts.tv_sec;
