@@ -1197,7 +1197,7 @@ char *ntfs_uppercase_mbs(const char *low,
 	} else {
 		upp = (char*)ntfs_malloc(size + 1);
 		if (upp) {
-			mbsupr((unsigned char *)upp, (const unsigned char *)low, size);
+			mbsupr(upp, low, size);
 			upp[size] = '\0';
 		}
 	}
