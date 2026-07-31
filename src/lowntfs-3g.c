@@ -3098,7 +3098,18 @@ static int ntfs_fuse_safe_rename(fuse_req_t req, fuse_ino_t ino,
 		if (ret)
 			goto restore;
 	        
-		ret = ntfs_fuse_rm(req, parent, name, RM_ANY);
+		/*
+		 * If this is a case-only rename of the same file in the same directory,
+		 * the old name was already removed when we unlinked 'newname' in step B
+		 * (since lookup is case-insensitive).
+		 * In this case, calling ntfs_fuse_rm on 'name' would case-insensitively
+		 * match the newly created 'newname' and delete it. So we must skip it.
+		 */
+		if ((!NVolCaseSensitive(ctx->vol)) && (parent == newparent) && (strcasecmp(name, newname) == 0)) {
+			ret = 0;
+		} else {
+			ret = ntfs_fuse_rm(req, parent, name, RM_ANY);
+		}
 		if (ret) {
 			if (ntfs_fuse_rm(req, newparent, newname, RM_ANY))
 				goto err;
