@@ -2281,12 +2281,14 @@ static int ntfs_fuse_utimens(struct SECURITY_CONTEXT *scx, fuse_ino_t ino,
 					ni->last_access_time
 						= timespec2ntfs(stin->st_atim);
 #else
-					ni->last_access_time.tv_sec
-						= stin->st_atime;
+					struct timespec ts;
+					ts.tv_sec = stin->st_atime;
 #ifdef HAVE_STRUCT_STAT_ST_ATIMENSEC
-					ni->last_access_time.tv_nsec
-						= stin->st_atimensec;
+					ts.tv_nsec = stin->st_atimensec;
+#else
+					ts.tv_nsec = 0;
 #endif
+					ni->last_access_time = timespec2ntfs(ts);
 #endif
 				}
 			if (to_set & FUSE_SET_ATTR_MTIME_NOW)
@@ -2300,12 +2302,14 @@ static int ntfs_fuse_utimens(struct SECURITY_CONTEXT *scx, fuse_ino_t ino,
 					ni->last_data_change_time 
 						= timespec2ntfs(stin->st_mtim);
 #else
-					ni->last_data_change_time.tv_sec
-						= stin->st_mtime;
+					struct timespec ts;
+					ts.tv_sec = stin->st_mtime;
 #ifdef HAVE_STRUCT_STAT_ST_ATIMENSEC
-					ni->last_data_change_time.tv_nsec
-						= stin->st_mtimensec;
+					ts.tv_nsec = stin->st_mtimensec;
+#else
+					ts.tv_nsec = 0;
 #endif
+					ni->last_data_change_time = timespec2ntfs(ts);
 #endif
 				}
 			ntfs_inode_update_times(ni, mask);
