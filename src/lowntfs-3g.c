@@ -475,11 +475,8 @@ static void ntfs_fuse_statfs(fuse_req_t req,
 
 	vol = ctx->vol;
 	if (vol) {
-	/* 
-	 * File system block size. Used to calculate used/free space by df.
-	 * Incorrectly documented as "optimal transfer block size". 
-	 */
-		sfs.f_bsize = vol->cluster_size;
+	/* Sector size in bytes (typically 512). */
+		sfs.f_bsize = vol->sector_size;
 
 	/* Fundamental file system block size, used as the unit. */
 		sfs.f_frsize = vol->cluster_size;
