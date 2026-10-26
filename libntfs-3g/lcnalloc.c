@@ -45,6 +45,21 @@
 #include "lcnalloc.h"
 #include "logging.h"
 #include "misc.h"
+#include "sector_cache.h"
+
+static void ntfs_discard_freed_clusters(ntfs_volume *vol, LCN lcn, s64 count)
+{
+	if (!vol || !vol->dev || !vol->dev->d_private || lcn < 0 || count <= 0)
+		return;
+	if (vol->cluster_size_bits < 9)
+		return;
+	uint64_t start_sec = ((uint64_t)lcn << vol->cluster_size_bits) >> 9;
+	uint64_t sec_count = ((uint64_t)count << vol->cluster_size_bits) >> 9;
+	if (sec_count > 0 && sec_count <= 0xFFFFFFFFULL) {
+		VolumeDiscardSectors((volume *)vol->dev->d_private, start_sec,
+				     (uint32_t)sec_count);
+	}
+}
 
 /*
  * Plenty possibilities for big optimizations all over in the cluster
@@ -588,6 +603,7 @@ int ntfs_cluster_free_from_rl(ntfs_volume *vol, runlist *rl)
 			       (long long)rl->lcn, (long long)rl->length);
 
 		if (rl->lcn >= 0) { 
+			ntfs_discard_freed_clusters(vol, rl->lcn, rl->length);
 			update_full_status(vol,rl->lcn);
 			if (ntfs_bitmap_clear_run(vol->lcnbmp_na, rl->lcn, 
 						  rl->length)) {
@@ -627,6 +643,7 @@ int ntfs_cluster_free_basic(ntfs_volume *vol, s64 lcn, s64 count)
 			       (long long)lcn, (long long)count);
 
 	if (lcn >= 0) { 
+		ntfs_discard_freed_clusters(vol, lcn, count);
 		update_full_status(vol,lcn);
 		if (ntfs_bitmap_clear_run(vol->lcnbmp_na, lcn, 
 						  count)) {
@@ -705,6 +722,11 @@ int ntfs_cluster_free(ntfs_volume *vol, ntfs_attr *na, VCN start_vcn, s64 count)
 
 	if (rl->lcn != LCN_HOLE) {
 		/* Do the actual freeing of the clusters in this run. */
+		if (na != vol->mft_na && na != vol->lcnbmp_na &&
+		    na != vol->mftbmp_na) {
+			ntfs_discard_freed_clusters(vol, rl->lcn + delta,
+						    to_free);
+		}
 		update_full_status(vol,rl->lcn + delta);
 		if (ntfs_bitmap_clear_run(vol->lcnbmp_na, rl->lcn + delta,
 					  to_free))
@@ -738,6 +760,11 @@ int ntfs_cluster_free(ntfs_volume *vol, ntfs_attr *na, VCN start_vcn, s64 count)
 			to_free = count;
 
 		if (rl->lcn != LCN_HOLE) {
+			if (na != vol->mft_na && na != vol->lcnbmp_na &&
+			    na != vol->mftbmp_na) {
+				ntfs_discard_freed_clusters(vol, rl->lcn,
+							    to_free);
+			}
 			update_full_status(vol,rl->lcn);
 			if (ntfs_bitmap_clear_run(vol->lcnbmp_na, rl->lcn,
 					to_free)) {
